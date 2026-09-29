@@ -1,0 +1,32 @@
+[project]
+name = "secure-sre"
+version = "0.1.0"
+description = "Secure Blackboard Multi-Agent SRE Architecture for SREGym"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7.0",
+    "langgraph>=0.2.0",
+    "langchain-core>=0.2.0",
+    "pyyaml>=6.0.1",
+    "httpx>=0.27.0",
+    "typing-extensions>=4.11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["clients"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]

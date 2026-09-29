@@ -1,0 +1,8 @@
+agents:
+  - name: graphstate
+    kickoff_command: python -m clients.graphstate.driver.live
+    kickoff_workdir: .
+    kickoff_env: null
+    install_script: null
+    agent_version: "0.2.0"
+    container_isolation: true
