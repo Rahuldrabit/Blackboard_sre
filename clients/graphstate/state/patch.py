@@ -13,7 +13,7 @@ This separation means:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -48,7 +48,7 @@ class StatePatch(BaseModel):
     # ── Producer identity ──────────────────────────────────────────────────
     agent_id: str
     agent_role: str
-    produced_at: datetime = Field(default_factory=datetime.utcnow)
+    produced_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # ── Evidence additions (all lists default to empty) ───────────────────
     new_observations: list[Observation] = Field(default_factory=list)

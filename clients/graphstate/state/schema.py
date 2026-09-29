@@ -10,7 +10,7 @@ Design principles:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -29,7 +29,7 @@ class Provenance(BaseModel):
 
     author_agent: str = Field(description="Agent ID or role that authored this")
     source: str = Field(description="Tool, rule, or mechanism that provided the underlying data")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     signature: str | None = Field(default=None, description="Optional integrity checksum or token")
 
 
@@ -283,7 +283,7 @@ class Task(BaseModel):
         description="Depth in the delegation chain. Rejected if > MAX_DELEGATION_DEPTH.",
     )
     status: TaskStatus = TaskStatus.PENDING
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     deadline: datetime | None = None
 
 
@@ -296,7 +296,7 @@ class TaskResult(BaseModel):
     patch_summary: str = Field(description="Human-readable summary of what was added to state")
     tokens_used: int = 0
     tool_calls_used: int = 0
-    completed_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     error: str | None = None
 
 
@@ -349,7 +349,7 @@ class ActionResult(BaseModel):
     rolled_back: bool = False
     regression_detected: bool = False
     regression_details: str | None = None
-    executed_at: datetime = Field(default_factory=datetime.utcnow)
+    executed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     health_after: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -397,7 +397,7 @@ class Diagnosis(BaseModel):
     diagnosis_method: str = Field(
         description="How this was reached: verified|high_confidence_hypothesis|timeout_fallback"
     )
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class MitigationResult(BaseModel):
@@ -407,7 +407,7 @@ class MitigationResult(BaseModel):
     actions_rolled_back: list[str] = Field(description="Action IDs that were rolled back")
     final_health_status: str
     mitigation_successful: bool
-    completed_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
