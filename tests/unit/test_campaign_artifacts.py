@@ -10,7 +10,7 @@ from clients.graphstate.driver.artifacts import ArtifactLog
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 from install_sregym import CONFIGURED_RESULTS, ORIGINAL_RESULTS, install
-from run_campaign import build_command, collect_feedback, lite_problems, slug
+from run_campaign import AGENT_NAME, build_command, collect_feedback, lite_problems, slug
 from offline_harness import exercise
 
 
@@ -41,6 +41,7 @@ def test_feedback_preserves_judge_reasoning_and_failed_outcomes(tmp_path):
 def test_single_problem_command_avoids_mutually_exclusive_suite_flag(tmp_path):
     command = build_command(tmp_path, "task", "openrouter/qwen/model", "openrouter/qwen/judge", ["diagnosis"])
     assert "--problem" in command and "--suite" not in command
+    assert command[command.index("--agent") + 1] == AGENT_NAME == "blackboard-sre"
     assert command[command.index("--model") + 1] == "openrouter/qwen/model"
     assert "--force-build" not in command
     assert "/" not in slug("openrouter/qwen/model")

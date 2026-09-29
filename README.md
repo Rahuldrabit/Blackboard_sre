@@ -1,7 +1,11 @@
 # Secure Blackboard Multi-Agent SRE
 
 **Cloud setup and logs:** [SREGym Lite run guide](docs/SREGYM_LITE.md).
+**Current evidence and limitations:** [architecture evaluation](docs/ARCHITECTURE_EVALUATION.md).
 Use `scripts/run_campaign.py --sregym ../SREGym --dry-run` to check all 21 tasks for both OpenRouter model configurations without inference or deployment.
+Live campaigns explicitly select the installed `blackboard-sre` agent; they do not
+run any pre-existing SREGym agent. Supply the OpenRouter credential only through the
+`OPENROUTER_API_KEY` environment variable as shown in the run guide.
 The original quickstart and experiment runner below are offline simulations; use the live campaign runner for benchmark evaluation.
 
 > **Title**: Reliable Multi-Agent SRE through Secure Blackboard Coordination, Evidence-Grounded Reasoning, and Adaptive Decision Routing  

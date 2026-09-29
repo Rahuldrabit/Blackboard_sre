@@ -68,7 +68,7 @@ def install(checkout: Path):
     manifest_path.write_text(json.dumps({"files": {
         str(path.relative_to(destination)): digest(path) for path in destination.rglob("*.py")
     }}, indent=2))
-    print(f"Installed graphstate in {checkout}; rebuild the agent image before live runs.")
+    print(f"Installed blackboard-sre in {checkout}; rebuild the agent image before live runs.")
 
 
 if __name__ == "__main__":

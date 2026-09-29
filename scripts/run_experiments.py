@@ -57,8 +57,15 @@ async def run_ablation_experiment(
 
             entry = {
                 "problem": prob,
-                "diagnosis_success": diag is not None,
-                "mitigation_success": mit.mitigation_successful if mit else False,
+                # The offline driver has no oracle. These fields describe lifecycle
+                # completion only and must not be reported as benchmark accuracy.
+                "diagnosis_produced": diag is not None,
+                "diagnosis_gate_passed": (
+                    None if cfg_name == "S0" else bool(
+                        diag and diag.diagnosis_method != "fallback_top_candidate"
+                    )
+                ),
+                "mitigation_committed": mit.mitigation_successful if mit else False,
                 "tokens": state.get("total_tokens_used", 0),
                 "tool_calls": state.get("total_tool_calls", 0),
             }
@@ -68,18 +75,33 @@ async def run_ablation_experiment(
     summary_table = []
     for cfg_name, runs in results.items():
         total = len(runs)
-        diag_acc = sum(1 for r in runs if r["diagnosis_success"]) / total if total else 0.0
-        mit_acc = sum(1 for r in runs if r["mitigation_success"]) / total if total else 0.0
+        diag_rate = sum(1 for r in runs if r["diagnosis_produced"]) / total if total else 0.0
+        gated = [r for r in runs if r["diagnosis_gate_passed"] is not None]
+        gate_rate = (
+            f"{sum(1 for r in gated if r['diagnosis_gate_passed']) / len(gated) * 100:.1f}%"
+            if gated else "N/A"
+        )
+        commit_rate = sum(1 for r in runs if r["mitigation_committed"]) / total if total else 0.0
         avg_tokens = sum(r["tokens"] for r in runs) / total if total else 0.0
 
         summary_table.append({
             "Configuration": cfg_name,
-            "DiagnosisAccuracy": f"{diag_acc*100:.1f}%",
-            "MitigationSuccess": f"{mit_acc*100:.1f}%",
+            "DiagnosisProduced": f"{diag_rate*100:.1f}%",
+            "DiagnosisGatePassed": gate_rate,
+            "SyntheticMitigationCommitted": f"{commit_rate*100:.1f}%",
             "AvgTokens": int(avg_tokens),
         })
 
-    return {"summary": summary_table, "runs": results}
+    return {
+        "evaluation_type": "offline_simulation",
+        "benchmark_scores": False,
+        "warning": (
+            "No real SREGym faults, model inference, grading, or oracle comparison occurred. "
+            "Lifecycle rates are not diagnosis accuracy or mitigation success."
+        ),
+        "summary": summary_table,
+        "runs": results,
+    }
 
 
 def main() -> None:
@@ -103,6 +125,7 @@ def main() -> None:
     print("\n" + "=" * 60)
     print("           EXPERIMENTAL RESULTS SUMMARY")
     print("=" * 60)
+    print("OFFLINE SIMULATION ONLY — these are not SREGym benchmark scores.")
     print(json.dumps(experiment_results["summary"], indent=2))
 
 
