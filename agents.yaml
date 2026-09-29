@@ -1,5 +1,5 @@
 agents:
-  - name: graphstate
+  - name: blackboard-sre
     kickoff_command: python -m clients.graphstate.driver.live
     kickoff_workdir: .
     kickoff_env: null

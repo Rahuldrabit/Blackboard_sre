@@ -38,9 +38,11 @@ uv sync --extra dev
 uv run python scripts/install_sregym.py ../SREGym
 ```
 
-The installer copies `clients/graphstate`, registers the live container entry point,
-and makes one host-side SREGym change: `SREGYM_RESULTS_DIR` can select the result
-root. Other agent registrations and their comments are retained. An installation
+The installer copies `clients/graphstate`, registers it with SREGym under the
+**`blackboard-sre`** agent name, and makes one host-side SREGym change:
+`SREGYM_RESULTS_DIR` can select the result root. Other agent registrations and their
+comments are retained; the campaign command always passes `--agent blackboard-sre`,
+so no pre-existing SREGym agent is selected. An installation
 manifest permits updates but rejects manual edits to the installed copy. The
 campaign runner checks that the installed source matches this repository.
 
@@ -116,6 +118,12 @@ bash scripts/run_sregym_lite.sh ../SREGym qwen
 bash scripts/run_sregym_lite.sh ../SREGym deepseek
 ```
 
+The first command is the complete 42-run matrix (21 Lite tasks × 2 models). To run
+all 21 tasks once, use either of the one-model shell commands. The OpenRouter key is
+read only from `OPENROUTER_API_KEY`; it is forwarded to the isolated Blackboard SRE
+container as the agent and judge credential and is never written to a manifest or
+command line. Do not pass the key as a command-line argument.
+
 Each task starts a separate SREGym process. Both stages run by default. The first
 process rebuilds the isolated agent image, and subsequent tasks reuse it.
 `--agent-timeout 1800` controls SREGym's agent-phase timeout. `--profile full` is the
@@ -146,8 +154,8 @@ artifacts/
         host_logs/                           # native SREGym host logging
         sregym_feedback.json                 # complete native CSV rows as JSON
         sregym/<upstream-timestamp>/
-          graphstate_ALL_results.csv         # official SREGym scores and feedback
-          graphstate/network_policy_block/
+          blackboard-sre_ALL_results.csv     # official SREGym scores and feedback
+          blackboard-sre/network_policy_block/
             phases_attempt1.jsonl            # native lifecycle timing, when emitted
             run_1/
               network_policy_block_results.csv

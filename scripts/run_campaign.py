@@ -24,6 +24,7 @@ MODELS = {
     "qwen": "openrouter/qwen/qwen3.5-flash-02-23",
     "deepseek": "openrouter/deepseek/deepseek-v4-flash",
 }
+AGENT_NAME = "blackboard-sre"
 
 
 def slug(value):
@@ -58,9 +59,9 @@ def static_checks(checkout, problems):
     if set(problems) - registered:
         raise ValueError(f"Unregistered tasks: {set(problems) - registered}")
     registrations = yaml.safe_load((checkout / "agents.yaml").read_text())["agents"]
-    agent = next((a for a in registrations if a["name"] == "graphstate"), None)
+    agent = next((a for a in registrations if a["name"] == AGENT_NAME), None)
     if not agent or agent.get("kickoff_command") != "python -m clients.graphstate.driver.live" or agent.get("container_isolation") is not True:
-        raise ValueError("Live isolated graphstate adapter is not installed")
+        raise ValueError(f"Live isolated {AGENT_NAME} adapter is not installed")
     main_text = (checkout / "main.py").read_text()
     if CONFIGURED_RESULTS not in main_text:
         raise ValueError("Run scripts/install_sregym.py to enable separated result directories")
@@ -79,7 +80,7 @@ def static_checks(checkout, problems):
 
 
 def build_command(checkout, problem, model, judge, stages, *, force_build=False, timeout=1800, profile="full"):
-    command = ["uv", "run", "main.py", "--problem", problem, "--agent", "graphstate",
+    command = ["uv", "run", "main.py", "--problem", problem, "--agent", AGENT_NAME,
                "--model", model, "--judge-model", judge, "--stages", *stages,
                "--profile", profile, "--agent-timeout", str(timeout),
                "--allow-agent-endpoint", "https://openrouter.ai"]
