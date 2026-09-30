@@ -187,6 +187,7 @@ def main():
     parser.add_argument("--resume", action="store_true", help="Skip tasks with a prior operationally complete result")
     parser.add_argument("--skip-deploy-failed", action="store_true", help="Skip tasks previously blocked before deployment")
     parser.add_argument("--continue-on-failure", action="store_true", help="Continue after a task has a native incomplete result")
+    parser.add_argument("--skip-astronomy", action="store_true", help="Skip Astronomy Shop tasks when its external images are unavailable")
     parser.add_argument("--agent-timeout", type=int, default=1800)
     parser.add_argument("--profile", choices=["full", "svelte"], default="full")
     args = parser.parse_args()
@@ -217,6 +218,15 @@ def main():
         for alias in args.models:
             model = MODELS[alias]
             for problem in problems:
+                if args.skip_astronomy and "astronomy_shop" in problem:
+                    record = {"model": model, "problem": problem, "skipped": True,
+                              "operationally_complete": False, "skip_reason": "astronomy_images_unavailable",
+                              "started_at": datetime.now(timezone.utc).isoformat(),
+                              "finished_at": datetime.now(timezone.utc).isoformat()}
+                    summary["runs"].append(record)
+                    write_json(summary_path, summary)
+                    print(f"SKIP astronomy images unavailable: {problem}", flush=True)
+                    continue
                 if args.resume and not args.dry_run:
                     prior = prior_complete_task(base, model, problem)
                     if prior:
