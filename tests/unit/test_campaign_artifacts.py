@@ -63,6 +63,11 @@ def test_single_problem_command_avoids_mutually_exclusive_suite_flag(tmp_path):
     assert "/" not in slug("openrouter/qwen/model")
 
 
+def test_campaign_builds_local_agent_image_for_each_isolated_task(tmp_path):
+    command = build_command(tmp_path, "task", "openrouter/qwen/model", "openrouter/qwen/judge", ["diagnosis"], force_build=True)
+    assert "--force-build" in command
+
+
 def test_installer_is_idempotent_and_rejects_destination_edits(tmp_path):
     (tmp_path / "sregym").mkdir()
     (tmp_path / "sregym/agent_registry.py").write_text("")

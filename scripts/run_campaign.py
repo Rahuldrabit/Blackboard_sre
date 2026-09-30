@@ -190,8 +190,12 @@ def main():
             for problem in problems:
                 task_dir = base / slug(model) / problem / run_id
                 task_dir.mkdir(parents=True, exist_ok=False)
+                # Each task is a separate SREGym process so its artifacts can be
+                # isolated. Force the local agent image for every process;
+                # otherwise later tasks try to pull the release digest instead
+                # of reusing the locally installed Blackboard driver.
                 command = build_command(checkout, problem, model, args.judge_model, args.stages,
-                                        force_build=not summary["runs"], timeout=args.agent_timeout, profile=args.profile)
+                                        force_build=True, timeout=args.agent_timeout, profile=args.profile)
                 record = {"model": model, "problem": problem, "output": str(task_dir), "command": command,
                           "started_at": datetime.now(timezone.utc).isoformat()}
                 write_json(task_dir / "manifest.json", {**record, "dry_run": args.dry_run,
