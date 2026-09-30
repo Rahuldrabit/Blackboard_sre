@@ -205,3 +205,4 @@ def test_live_runner_uses_bounded_turns_for_expensive_remote_models():
     run = runner()
     assert run.turns == 2
     assert run.token_reserve == 15_000
+    assert run.mitigation_token_budget == 50_000

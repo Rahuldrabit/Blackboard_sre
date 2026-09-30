@@ -91,6 +91,10 @@ class LiveRunner:
         # Keep enough headroom for a final specialist response and submission.
         # Provider usage is known only after a response, so this is a soft limit.
         self.token_reserve = min(20_000, max(4_000, token_budget // 10))
+        # Diagnosis and mitigation are separate SREGym stages. Give mitigation
+        # a bounded fresh allowance after diagnosis has been submitted, rather
+        # than making a valid diagnosis consume the entire run budget.
+        self.mitigation_token_budget = max(30_000, token_budget // 3)
         self.tool_timeout = tool_timeout
         artifact_id = os.environ.get("SREGYM_ARTIFACT_ID", "unknown")
         self.state = initial_state("live", artifact_id, ["diagnosis", "mitigation"],
@@ -295,6 +299,9 @@ class LiveRunner:
         if status != "mitigation":
             raise RuntimeError("Timed out waiting for mitigation stage")
         self.state["phase"] = "mitigation"
+        self.state["token_budget_remaining"] = self.mitigation_token_budget
+        self.record({"type": "budget_reset", "phase": "mitigation",
+                     "token_budget_remaining": self.mitigation_token_budget})
         agent = MitigationAgent()
         feedback = ""
         for _ in range(self.rounds * self.turns):
