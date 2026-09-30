@@ -122,6 +122,20 @@ def prior_complete_task(base, model, problem):
     return None
 
 
+def prior_deploy_failed_task(base, model, problem):
+    """Find a prior run that failed before deployment completed."""
+    root = base / slug(model) / problem
+    for outcome in sorted(root.glob("*/outcome.json"), reverse=True):
+        try:
+            if json.loads(outcome.read_text()).get("native_run_statuses") == []:
+                feedback = outcome.parent / "sregym_feedback.json"
+                if "deploy_failed" in feedback.read_text() if feedback.exists() else False:
+                    return outcome.parent
+        except (OSError, ValueError):
+            continue
+    return None
+
+
 def run_live(checkout, task_dir, command, model, judge):
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
@@ -171,6 +185,8 @@ def main():
     parser.add_argument("--results-dir", type=Path, default=ROOT / "artifacts")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--resume", action="store_true", help="Skip tasks with a prior operationally complete result")
+    parser.add_argument("--skip-deploy-failed", action="store_true", help="Skip tasks previously blocked before deployment")
+    parser.add_argument("--continue-on-failure", action="store_true", help="Continue after a task has a native incomplete result")
     parser.add_argument("--agent-timeout", type=int, default=1800)
     parser.add_argument("--profile", choices=["full", "svelte"], default="full")
     args = parser.parse_args()
@@ -212,6 +228,18 @@ def main():
                         write_json(summary_path, summary)
                         print(f"RESUME skip {alias}: {problem} ← {prior}", flush=True)
                         continue
+                if args.skip_deploy_failed and not args.dry_run:
+                    prior = prior_deploy_failed_task(base, model, problem)
+                    if prior:
+                        record = {"model": model, "problem": problem, "skipped": True,
+                                  "resumed_from": str(prior), "operationally_complete": False,
+                                  "skip_reason": "prior_deploy_failed",
+                                  "started_at": datetime.now(timezone.utc).isoformat(),
+                                  "finished_at": datetime.now(timezone.utc).isoformat()}
+                        summary["runs"].append(record)
+                        write_json(summary_path, summary)
+                        print(f"RESUME skip deploy failure {alias}: {problem} ← {prior}", flush=True)
+                        continue
                 task_dir = base / slug(model) / problem / run_id
                 task_dir.mkdir(parents=True, exist_ok=False)
                 # Each task is a separate SREGym process so its artifacts can be
@@ -244,7 +272,8 @@ def main():
                 write_json(task_dir / "outcome.json", record)
                 write_json(summary_path, summary)
                 print(f"{'DRY-RUN' if args.dry_run else 'LIVE'} {alias}: {problem} → {task_dir}", flush=True)
-                if not args.dry_run and (record["exit_code"] != 0 or not record["operationally_complete"]):
+                if (not args.dry_run and (record["exit_code"] != 0 or not record["operationally_complete"])
+                        and not args.continue_on_failure):
                     raise SystemExit(f"SREGym failed; campaign stopped to avoid running the next task on an unclean cluster. Logs: {task_dir}")
     summary["finished_at"] = datetime.now(timezone.utc).isoformat()
     write_json(summary_path, summary)

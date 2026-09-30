@@ -18,7 +18,7 @@ from install_sregym import (
     ORIGINAL_RESULTS,
     install,
 )
-from run_campaign import AGENT_NAME, build_command, collect_feedback, feedback_run_statuses, lite_problems, prior_complete_task, slug
+from run_campaign import AGENT_NAME, build_command, collect_feedback, feedback_run_statuses, lite_problems, prior_complete_task, prior_deploy_failed_task, slug
 from offline_harness import exercise
 
 
@@ -59,6 +59,14 @@ def test_resume_only_skips_operationally_complete_runs(tmp_path):
     complete.mkdir(parents=True)
     (complete / "outcome.json").write_text('{"operationally_complete": true}\n')
     assert prior_complete_task(tmp_path, "model", "task") == complete
+
+
+def test_resume_can_identify_prior_deploy_failure(tmp_path):
+    failed = tmp_path / "model" / "task" / "run1"
+    failed.mkdir(parents=True)
+    (failed / "outcome.json").write_text('{"native_run_statuses": []}\n')
+    (failed / "sregym_feedback.json").write_text('{"files": {"result.csv": [{"deploy_failed": "True"}]}}\n')
+    assert prior_deploy_failed_task(tmp_path, "model", "task") == failed
 
 
 def test_single_problem_command_avoids_mutually_exclusive_suite_flag(tmp_path):
