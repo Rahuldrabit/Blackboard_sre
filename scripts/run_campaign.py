@@ -100,6 +100,16 @@ def collect_feedback(task_dir):
     return bool(files)
 
 
+def feedback_run_statuses(task_dir):
+    """Return distinct native run statuses from the collected SREGym CSV rows."""
+    path = task_dir / "sregym_feedback.json"
+    if not path.exists():
+        return []
+    feedback = json.loads(path.read_text())
+    return sorted({row["run_status"] for rows in feedback.get("files", {}).values()
+                   for row in rows if row.get("run_status")})
+
+
 def run_live(checkout, task_dir, command, model, judge):
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
@@ -128,7 +138,10 @@ def run_live(checkout, task_dir, command, model, judge):
             raise
         finally:
             feedback_present = collect_feedback(task_dir)
+    statuses = feedback_run_statuses(task_dir)
     return {"exit_code": return_code, "native_feedback_present": feedback_present,
+            "native_run_statuses": statuses,
+            "operationally_complete": bool(statuses) and "incomplete" not in statuses,
             "model": model, "judge_model": judge, "real_task_success": "see sregym_feedback.json"}
 
 
@@ -203,7 +216,7 @@ def main():
                 write_json(task_dir / "outcome.json", record)
                 write_json(summary_path, summary)
                 print(f"{'DRY-RUN' if args.dry_run else 'LIVE'} {alias}: {problem} → {task_dir}", flush=True)
-                if not args.dry_run and record["exit_code"] != 0:
+                if not args.dry_run and (record["exit_code"] != 0 or not record["operationally_complete"]):
                     raise SystemExit(f"SREGym failed; campaign stopped to avoid running the next task on an unclean cluster. Logs: {task_dir}")
     summary["finished_at"] = datetime.now(timezone.utc).isoformat()
     write_json(summary_path, summary)

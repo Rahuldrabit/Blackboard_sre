@@ -12,6 +12,20 @@ import yaml
 
 ORIGINAL_RESULTS = 'base_dir = Path("results") / get_current_datetime_formatted()'
 CONFIGURED_RESULTS = 'base_dir = Path(os.environ.get("SREGYM_RESULTS_DIR", "results")) / get_current_datetime_formatted()'
+ORIGINAL_DOCKER_BIND = '''def get_container_host_bind_address() -> str:
+    """Return a host bind address reachable from the agent container."""
+    if platform.system() != "Linux":'''
+CONFIGURED_DOCKER_BIND = '''def get_container_host_bind_address() -> str:
+    """Return a host bind address reachable from the agent container."""
+    if _docker_uses_separate_host():'''
+ORIGINAL_CUSTOM_PROVIDER = '''    raise ValueError(
+        f"Filtered internet access does not know the model provider for agent '{policy.agent_name}'. "
+        "Use a supported agent or run with --internet-access open."
+    )'''
+CONFIGURED_CUSTOM_PROVIDER = '''    custom_base = _configured_url(environment, "AGENT_API_BASE")
+    if custom_base:
+        return (EndpointRule.host_from_url(custom_base),)
+    return _provider_rules(_provider_from_model(model), environment)'''
 
 
 def digest(path):
@@ -37,6 +51,18 @@ def install(checkout: Path):
         raise ValueError("Upstream results-directory code changed; review compatibility before installing")
     if main_text.count(ORIGINAL_RESULTS) > 1:
         raise ValueError("Ambiguous upstream results-directory code")
+    container_runner = checkout / "sregym/service/container_runner.py"
+    container_runner_text = container_runner.read_text()
+    if ORIGINAL_DOCKER_BIND not in container_runner_text and CONFIGURED_DOCKER_BIND not in container_runner_text:
+        raise ValueError("Upstream Docker host-address code changed; review compatibility before installing")
+    if container_runner_text.count(ORIGINAL_DOCKER_BIND) > 1:
+        raise ValueError("Ambiguous upstream Docker host-address code")
+    provider_endpoints = checkout / "sregym/service/provider_endpoints.py"
+    provider_text = provider_endpoints.read_text()
+    if ORIGINAL_CUSTOM_PROVIDER not in provider_text and CONFIGURED_CUSTOM_PROVIDER not in provider_text:
+        raise ValueError("Upstream custom-agent provider code changed; review compatibility before installing")
+    if provider_text.count(ORIGINAL_CUSTOM_PROVIDER) > 1:
+        raise ValueError("Ambiguous upstream custom-agent provider code")
     destination = checkout / "clients/graphstate"
     manifest_path = checkout / ".graphstate-install.json"
     previous = json.loads(manifest_path.read_text()).get("files", {}) if manifest_path.exists() else {}
@@ -65,6 +91,10 @@ def install(checkout: Path):
             registry.write_text(yaml.safe_dump(data, sort_keys=False))
     if ORIGINAL_RESULTS in main_text:
         main.write_text(main_text.replace(ORIGINAL_RESULTS, CONFIGURED_RESULTS))
+    if ORIGINAL_DOCKER_BIND in container_runner_text:
+        container_runner.write_text(container_runner_text.replace(ORIGINAL_DOCKER_BIND, CONFIGURED_DOCKER_BIND))
+    if ORIGINAL_CUSTOM_PROVIDER in provider_text:
+        provider_endpoints.write_text(provider_text.replace(ORIGINAL_CUSTOM_PROVIDER, CONFIGURED_CUSTOM_PROVIDER))
     manifest_path.write_text(json.dumps({"files": {
         str(path.relative_to(destination)): digest(path) for path in destination.rglob("*.py")
     }}, indent=2))

@@ -39,8 +39,11 @@ uv run python scripts/install_sregym.py ../SREGym
 ```
 
 The installer copies `clients/graphstate`, registers it with SREGym under the
-**`blackboard-sre`** agent name, and makes one host-side SREGym change:
-`SREGYM_RESULTS_DIR` can select the result root. Other agent registrations and their
+**`blackboard-sre`** agent name, and makes three host-side SREGym changes:
+`SREGYM_RESULTS_DIR` can select the result root, and SREGym's existing
+separate-Docker-host detection selects a reachable proxy bind address on Docker
+Desktop under WSL. Filtered egress can resolve a custom agent from its explicit
+`AGENT_API_BASE` or model provider. Other agent registrations and their
 comments are retained; the campaign command always passes `--agent blackboard-sre`,
 so no pre-existing SREGym agent is selected. An installation
 manifest permits updates but rejects manual edits to the installed copy. The

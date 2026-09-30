@@ -131,6 +131,26 @@ def test_causal_verifier_four_checks():
     assert result.verified_claim.knowledge_level.value == "verified"
 
 
+def test_causal_verifier_accepts_direct_kubernetes_configuration_evidence():
+    verifier = CausalVerifier(min_evidence_count=2)
+    state = initial_state("inc", "prob", ["diagnosis"], {})
+    state["observations"] = [
+        Observation(id="E1", timestamp=datetime.now(timezone.utc), source="exec_kubectl_cmd_safely",
+                    author_agent="config_system", observation_type=ObservationType.CONFIG,
+                    summary="NetworkPolicy manifest", tool_name="exec_kubectl_cmd_safely"),
+        Observation(id="E2", timestamp=datetime.now(timezone.utc), source="exec_kubectl_cmd_safely",
+                    author_agent="config_system", observation_type=ObservationType.CONFIG,
+                    summary="Pod and service selectors", tool_name="exec_kubectl_cmd_safely"),
+    ]
+    hypothesis = Hypothesis(
+        id="H_config", timestamp=datetime.now(timezone.utc), author_agent="config_system",
+        claim="NetworkPolicy blocks service traffic", affected_services=["frontend"],
+        causal_path=["frontend"], supporting_evidence=["E1", "E2"],
+        contradictory_evidence=[], untested_predictions=[], confidence=0.9,
+    )
+    assert verifier.verify_hypothesis(hypothesis, state).passed
+
+
 def test_diagnosis_gate_enforcement():
     """Verify DiagnosisGate blocks premature submission and approves verified RCA."""
     gate = DiagnosisGate()

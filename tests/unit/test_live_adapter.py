@@ -62,6 +62,32 @@ async def test_tool_failures_do_not_create_observations():
 
 
 @pytest.mark.asyncio
+async def test_tool_timeout_is_recorded_without_observation():
+    run = runner()
+    run.tool_timeout = 0.01
+
+    async def never_returns(*args, **kwargs):
+        await __import__("asyncio").sleep(1)
+
+    run.sessions["exec_kubectl_cmd_safely"].call_tool.side_effect = never_returns
+    with pytest.raises(RuntimeError, match="Tool timed out"):
+        await run.execute("exec_kubectl_cmd_safely", {"cmd": "kubectl get pods"}, "topology")
+    assert not run.state["observations"]
+    assert any(event["type"] == "tool_error" and "timed out" in event["error"] for event in run.events)
+    await run.http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_mcp_transport_error_becomes_recoverable_runtime_error():
+    run = runner()
+    run.sessions["exec_kubectl_cmd_safely"].call_tool.side_effect = OSError("session closed")
+    with pytest.raises(RuntimeError, match="MCP tool call failed"):
+        await run.execute("exec_kubectl_cmd_safely", {"cmd": "kubectl get pods"}, "topology")
+    assert not run.state["observations"]
+    await run.http.aclose()
+
+
+@pytest.mark.asyncio
 async def test_submission_protocol_and_rejection():
     requests = []
     def handler(request):
@@ -97,6 +123,16 @@ async def test_hallucinated_evidence_is_not_accepted():
 
 
 @pytest.mark.asyncio
+async def test_uppercase_hypothesis_status_does_not_crash_turn():
+    run = runner({"hypothesis_updates": [{
+        "hypothesis_id": "missing", "confidence_delta": -0.1, "reason": "test",
+        "new_supporting_evidence": [], "new_contradictory_evidence": [], "status_update": "ACTIVE",
+    }]})
+    await run.turn(TopologySpecialist())
+    await run.http.aclose()
+
+
+@pytest.mark.asyncio
 async def test_diagnosis_only_exits_after_harness_done():
     run = runner({"stage_complete": True})
     run.api = AsyncMock(side_effect=[{"namespace": "test"}, {"stage": "diagnosis"}, {"stage": "done"}])
@@ -113,6 +149,22 @@ def test_invalid_json_fails_instead_of_mocking():
     with pytest.raises(json.JSONDecodeError):
         parse_response("provider failed")
     assert parse_response('```json\n{"stage_complete": true}\n```')["stage_complete"]
+
+
+def test_qwen_reasoning_before_fenced_json_is_accepted():
+    content = 'analysis before output\n</think>\n```json\n{"stage_complete": false}\n```'
+    assert parse_response(content) == {"stage_complete": False}
+
+
+def test_qwen_reasoning_before_unfenced_json_is_accepted():
+    content = 'analysis before output\n</think>\n{"tool_calls_requested": []}'
+    assert parse_response(content) == {"tool_calls_requested": []}
+
+
+def test_live_state_uses_harness_artifact_identity(monkeypatch):
+    monkeypatch.setenv("SREGYM_ARTIFACT_ID", "anon_test_identity")
+    run = runner()
+    assert run.state["problem_id"] == "anon_test_identity"
 
 
 @pytest.mark.asyncio
@@ -136,3 +188,20 @@ async def test_missing_usage_fails_without_tool_execution():
         await run.turn(TopologySpecialist())
     assert not run.state["observations"]
     await run.http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_response_crossing_token_budget_is_processed_before_stopping():
+    run = runner({"stage_complete": True})
+    run.state["token_budget_remaining"] = 1
+    complete, _ = await run.turn(TopologySpecialist())
+    assert complete is True
+    assert run.state["token_budget_remaining"] == 0
+    assert any(event["type"] == "model" for event in run.events)
+    await run.http.aclose()
+
+
+def test_live_runner_uses_bounded_turns_for_expensive_remote_models():
+    run = runner()
+    assert run.turns == 2
+    assert run.token_reserve == 15_000

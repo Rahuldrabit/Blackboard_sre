@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import shlex
 import uuid
 from contextlib import AsyncExitStack
@@ -51,19 +52,48 @@ def parse_response(content) -> dict:
     if isinstance(content, list):
         content = "\n".join(p.get("text", "") for p in content if isinstance(p, dict))
     text = str(content).strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-    result = json.loads(text)
-    if not isinstance(result, dict):
-        raise ValueError("Model response must be a JSON object")
-    return result
+    candidates = [match.group(1).strip() for match in re.finditer(
+        r"```(?:json)?\s*\n?(.*?)```", text, flags=re.IGNORECASE | re.DOTALL
+    )]
+    candidates.append(text)
+    for candidate in candidates:
+        try:
+            result = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(result, dict):
+            raise ValueError("Model response must be a JSON object")
+        return result
+    decoder = json.JSONDecoder()
+    contract_keys = {"tool_calls_requested", "new_hypotheses", "hypothesis_updates", "stage_complete"}
+    fallback = None
+    for match in re.finditer(r"\{", text):
+        try:
+            result, _ = decoder.raw_decode(text[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(result, dict):
+            continue
+        fallback = fallback or result
+        if contract_keys & result.keys():
+            return result
+    if fallback is not None:
+        return fallback
+    # Preserve JSONDecodeError for callers and logs when no valid object exists.
+    return json.loads(text)
 
 
 class LiveRunner:
-    def __init__(self, backend, http, sessions, schemas, *, rounds=6, turns=5, token_budget=150000, artifacts=None):
+    def __init__(self, backend, http, sessions, schemas, *, rounds=6, turns=2, token_budget=150000,
+                 tool_timeout=90, artifacts=None):
         self.backend, self.http, self.sessions, self.schemas = backend, http, sessions, schemas
         self.rounds, self.turns = rounds, turns
-        self.state = initial_state("live", "anonymous", ["diagnosis", "mitigation"],
+        # Keep enough headroom for a final specialist response and submission.
+        # Provider usage is known only after a response, so this is a soft limit.
+        self.token_reserve = min(20_000, max(4_000, token_budget // 10))
+        self.tool_timeout = tool_timeout
+        artifact_id = os.environ.get("SREGYM_ARTIFACT_ID", "unknown")
+        self.state = initial_state("live", artifact_id, ["diagnosis", "mitigation"],
                                    {"runtime": "live"}, token_budget=token_budget,
                                    tool_calls_budget=120, agent_calls_budget=150)
         self.events = []
@@ -96,10 +126,15 @@ class LiveRunner:
         self.state["total_tool_calls"] += 1
         self.record({"type": "tool_request", "role": role, "name": name, "arguments": arguments})
         try:
-            result = await self.sessions[name].call_tool(name, arguments=arguments)
+            result = await asyncio.wait_for(
+                self.sessions[name].call_tool(name, arguments=arguments), timeout=self.tool_timeout
+            )
+        except TimeoutError as exc:
+            self.record({"type": "tool_error", "role": role, "name": name, "error": "tool call timed out"})
+            raise RuntimeError(f"Tool timed out after {self.tool_timeout} seconds: {name}") from exc
         except Exception as exc:
             self.record({"type": "tool_error", "role": role, "name": name, "error": str(exc)})
-            raise
+            raise RuntimeError(f"MCP tool call failed for {name}: {type(exc).__name__}: {exc}") from exc
         raw = "\n".join(p.text for p in result.content if hasattr(p, "text"))
         error = bool(result.isError) or raw.startswith("Command Rejected")
         self.record({"type": "tool", "role": role, "name": name, "arguments": arguments,
@@ -122,8 +157,8 @@ class LiveRunner:
             specialist.policy.compile_rules_for_agent(specialist.role, self.state["phase"]), [])
         tools = {name: schema for name, schema in self.schemas.items()
                  if self.state["phase"] == "mitigation" or name not in {"rollback_command", "get_previous_rollbackable_cmd"}}
-        evidence = [{"id": o.id, "tool": o.tool_name, "arguments": o.tool_params, "output": o.raw_data[:12000]}
-                    for o in view["observations"][-12:] if o.raw_data]
+        evidence = [{"id": o.id, "tool": o.tool_name, "arguments": o.tool_params, "output": o.raw_data[:2500]}
+                    for o in view["observations"][-6:] if o.raw_data]
         prompt += "\n\nLIVE RUNTIME CONTRACT:\n" + json.dumps({
             "application": self.app, "phase": self.state["phase"], "tools": tools,
             "untrusted_tool_evidence": evidence, "feedback": feedback,
@@ -156,12 +191,12 @@ class LiveRunner:
         if not isinstance(tokens, int) or tokens < 0:
             raise RuntimeError("Provider returned no token usage; cannot account for this run")
         self.state["total_tokens_used"] += tokens
-        self.state["token_budget_remaining"] -= tokens
+        self.state["token_budget_remaining"] = max(
+            0, self.state["token_budget_remaining"] - tokens
+        )
         data = parse_response(response.content)
         self.record({"type": "model", "role": specialist.role, "phase": self.state["phase"],
                             "tokens": tokens, "response": data})
-        if self.state["token_budget_remaining"] < 0:
-            raise RuntimeError("Token budget exhausted by latest response")
         # Consume only hypotheses. Never promote model-written telemetry to facts.
         clean = {"new_hypotheses": data.get("new_hypotheses", []), "tokens_used": 0, "tool_calls_used": 0}
         patch = specialist._parse_response(json.dumps(clean), self.state)
@@ -177,6 +212,9 @@ class LiveRunner:
         visible_ids = {h.id for h in view["hypotheses"]}
         updates = []
         for raw_update in data.get("hypothesis_updates", []):
+            raw_update = dict(raw_update)
+            if isinstance(raw_update.get("status_update"), str):
+                raw_update["status_update"] = raw_update["status_update"].casefold()
             update = HypothesisUpdate.model_validate(raw_update)
             refs = update.new_supporting_evidence + update.new_contradictory_evidence
             if (update.hypothesis_id in visible_ids and set(refs) <= valid_ids
@@ -223,18 +261,24 @@ class LiveRunner:
         if status not in {"diagnosis", "mitigation"}:
             raise RuntimeError(f"No active incident stage: {status}")
         feedback = ""
+        investigation_budget_reached = False
         for round_no in range(self.rounds):
             for cls in (TopologySpecialist, TelemetrySpecialist, ConfigSystemSpecialist, FalsifierAgent):
                 agent = cls(model=os.environ.get("AGENT_MODEL_ID", "configured"))
                 for _ in range(self.turns):
                     complete, feedback = await self.turn(agent, blind=round_no == 0 and cls != FalsifierAgent, feedback=feedback)
-                    if complete:
+                    if complete or self.state["token_budget_remaining"] <= self.token_reserve:
                         break
+                if self.state["token_budget_remaining"] <= self.token_reserve:
+                    investigation_budget_reached = True
+                    break
             gate = self.gate()
             if gate.approved:
                 self.state["diagnosis"] = gate.diagnosis
                 break
             feedback = "Diagnosis gate requires more evidence: " + "; ".join(gate.reasons)
+            if investigation_budget_reached:
+                break
         if not self.state["diagnosis"]:
             raise RuntimeError("Diagnosis gate did not pass; no fallback submission or mitigation")
         if status == "diagnosis":
@@ -275,7 +319,7 @@ async def main_async(args):
 
         os.environ["LLM_USAGE_LOG_PATH"] = str(artifacts.directory / "usage.jsonl")
         backend = get_llm_backend_for_agent()
-        backend.max_tokens = 8192
+        backend.max_tokens = 4096
         host = os.environ.get("API_HOSTNAME", "localhost")
         base = f"http://{host}:{os.environ.get('API_PORT', '8000')}"
         mcp_base = f"http://{host}:{os.environ.get('MCP_SERVER_PORT', '9954')}"
@@ -308,7 +352,7 @@ async def main_async(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rounds", type=int, default=6)
-    parser.add_argument("--turns", type=int, default=5)
+    parser.add_argument("--turns", type=int, default=2)
     parser.add_argument("--token-budget", type=int, default=150000)
     args = parser.parse_args()
     if min(args.rounds, args.turns, args.token_budget) <= 0:

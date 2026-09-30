@@ -25,6 +25,7 @@ from clients.graphstate.state.schema import (
     Hypothesis,
     HypothesisStatus,
     Observation,
+    ObservationType,
     VerifiedClaim,
 )
 
@@ -170,6 +171,12 @@ class CausalVerifier:
         for e_id in hypothesis.supporting_evidence:
             obs = obs_map.get(e_id)
             if obs:
+                # A direct Kubernetes read is empirical configuration evidence. Many
+                # configuration incidents (NetworkPolicy, probes, selectors, mounts)
+                # have no meaningful numeric anomaly score.
+                if (obs.observation_type == ObservationType.CONFIG
+                        and obs.tool_name == "exec_kubectl_cmd_safely"):
+                    return True
                 # If an observation reports an anomaly score or is a log/config error, passes
                 if obs.anomaly_score is not None and obs.anomaly_score > 0.5:
                     return True

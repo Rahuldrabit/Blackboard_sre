@@ -9,8 +9,16 @@ from clients.graphstate.driver.artifacts import ArtifactLog
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
-from install_sregym import CONFIGURED_RESULTS, ORIGINAL_RESULTS, install
-from run_campaign import AGENT_NAME, build_command, collect_feedback, lite_problems, slug
+from install_sregym import (
+    CONFIGURED_DOCKER_BIND,
+    CONFIGURED_CUSTOM_PROVIDER,
+    CONFIGURED_RESULTS,
+    ORIGINAL_DOCKER_BIND,
+    ORIGINAL_CUSTOM_PROVIDER,
+    ORIGINAL_RESULTS,
+    install,
+)
+from run_campaign import AGENT_NAME, build_command, collect_feedback, feedback_run_statuses, lite_problems, slug
 from offline_harness import exercise
 
 
@@ -38,6 +46,14 @@ def test_feedback_preserves_judge_reasoning_and_failed_outcomes(tmp_path):
     assert row["diagnosis.reasoning"] == "Wrong component, needs evidence"
 
 
+def test_native_incomplete_status_is_detected_even_when_harness_exits_zero(tmp_path):
+    path = tmp_path / "sregym/results.csv"
+    path.parent.mkdir()
+    path.write_text("problem_id,run_status,incomplete_reason\ntask,incomplete,no_submission\n")
+    collect_feedback(tmp_path)
+    assert feedback_run_statuses(tmp_path) == ["incomplete"]
+
+
 def test_single_problem_command_avoids_mutually_exclusive_suite_flag(tmp_path):
     command = build_command(tmp_path, "task", "openrouter/qwen/model", "openrouter/qwen/judge", ["diagnosis"])
     assert "--problem" in command and "--suite" not in command
@@ -50,12 +66,19 @@ def test_single_problem_command_avoids_mutually_exclusive_suite_flag(tmp_path):
 def test_installer_is_idempotent_and_rejects_destination_edits(tmp_path):
     (tmp_path / "sregym").mkdir()
     (tmp_path / "sregym/agent_registry.py").write_text("")
+    runner = tmp_path / "sregym/service/container_runner.py"
+    runner.parent.mkdir()
+    runner.write_text(ORIGINAL_DOCKER_BIND)
+    provider = tmp_path / "sregym/service/provider_endpoints.py"
+    provider.write_text(ORIGINAL_CUSTOM_PROVIDER)
     (tmp_path / "agents.yaml").write_text('agents:\n  # keep this comment\n  - name: other\n')
     (tmp_path / "main.py").write_text(ORIGINAL_RESULTS)
     install(tmp_path)
     install(tmp_path)
     assert "# keep this comment" in (tmp_path / "agents.yaml").read_text()
     assert CONFIGURED_RESULTS in (tmp_path / "main.py").read_text()
+    assert CONFIGURED_DOCKER_BIND in runner.read_text()
+    assert CONFIGURED_CUSTOM_PROVIDER in provider.read_text()
     live = tmp_path / "clients/graphstate/driver/live.py"
     live.write_text(live.read_text() + '\n# manual edit\n')
     with pytest.raises(ValueError, match="untracked edits"):
