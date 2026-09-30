@@ -183,6 +183,21 @@ async def test_stages_submit_once_in_order_without_claiming_success():
 
 
 @pytest.mark.asyncio
+async def test_mitigation_budget_exhaustion_is_submitted_for_harness_grading():
+    run = runner({"stage_complete": True})
+    run.api = AsyncMock(side_effect=[{"namespace": "test"}, {"stage": "diagnosis"}, {"stage": "mitigation"}])
+    diagnosis = SimpleNamespace(model_dump=lambda **kw: {"root_cause": "test"})
+    run.gate = lambda: SimpleNamespace(approved=True, diagnosis=diagnosis, reasons=[])
+    run.submit = AsyncMock()
+    run.turn = AsyncMock(return_value=(True, ""))
+    run.mitigation_token_budget = 0
+    await run.run()
+    assert [call.args[0] for call in run.submit.await_args_list] == ["diagnosis", "mitigation"]
+    assert any(event["type"] == "mitigation_fallback" for event in run.events)
+    await run.http.aclose()
+
+
+@pytest.mark.asyncio
 async def test_missing_usage_fails_without_tool_execution():
     run = runner()
     run.backend.inference = lambda prompt: SimpleNamespace(content="{}", usage_metadata=None)
