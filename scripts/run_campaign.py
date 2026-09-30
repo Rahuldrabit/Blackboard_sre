@@ -110,6 +110,18 @@ def feedback_run_statuses(task_dir):
                    for row in rows if row.get("run_status")})
 
 
+def prior_complete_task(base, model, problem):
+    """Find a prior operationally complete run for resume mode."""
+    root = base / slug(model) / problem
+    for outcome in sorted(root.glob("*/outcome.json"), reverse=True):
+        try:
+            if json.loads(outcome.read_text()).get("operationally_complete") is True:
+                return outcome.parent
+        except (OSError, ValueError):
+            continue
+    return None
+
+
 def run_live(checkout, task_dir, command, model, judge):
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
@@ -158,6 +170,7 @@ def main():
     parser.add_argument("--judge-model", default=os.environ.get("BLACKBOARD_JUDGE_MODEL", MODELS["qwen"]))
     parser.add_argument("--results-dir", type=Path, default=ROOT / "artifacts")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--resume", action="store_true", help="Skip tasks with a prior operationally complete result")
     parser.add_argument("--agent-timeout", type=int, default=1800)
     parser.add_argument("--profile", choices=["full", "svelte"], default="full")
     args = parser.parse_args()
@@ -188,6 +201,17 @@ def main():
         for alias in args.models:
             model = MODELS[alias]
             for problem in problems:
+                if args.resume and not args.dry_run:
+                    prior = prior_complete_task(base, model, problem)
+                    if prior:
+                        record = {"model": model, "problem": problem, "skipped": True,
+                                  "resumed_from": str(prior), "operationally_complete": True,
+                                  "started_at": datetime.now(timezone.utc).isoformat(),
+                                  "finished_at": datetime.now(timezone.utc).isoformat()}
+                        summary["runs"].append(record)
+                        write_json(summary_path, summary)
+                        print(f"RESUME skip {alias}: {problem} ← {prior}", flush=True)
+                        continue
                 task_dir = base / slug(model) / problem / run_id
                 task_dir.mkdir(parents=True, exist_ok=False)
                 # Each task is a separate SREGym process so its artifacts can be

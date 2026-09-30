@@ -18,7 +18,7 @@ from install_sregym import (
     ORIGINAL_RESULTS,
     install,
 )
-from run_campaign import AGENT_NAME, build_command, collect_feedback, feedback_run_statuses, lite_problems, slug
+from run_campaign import AGENT_NAME, build_command, collect_feedback, feedback_run_statuses, lite_problems, prior_complete_task, slug
 from offline_harness import exercise
 
 
@@ -52,6 +52,13 @@ def test_native_incomplete_status_is_detected_even_when_harness_exits_zero(tmp_p
     path.write_text("problem_id,run_status,incomplete_reason\ntask,incomplete,no_submission\n")
     collect_feedback(tmp_path)
     assert feedback_run_statuses(tmp_path) == ["incomplete"]
+
+
+def test_resume_only_skips_operationally_complete_runs(tmp_path):
+    complete = tmp_path / "model" / "task" / "run1"
+    complete.mkdir(parents=True)
+    (complete / "outcome.json").write_text('{"operationally_complete": true}\n')
+    assert prior_complete_task(tmp_path, "model", "task") == complete
 
 
 def test_single_problem_command_avoids_mutually_exclusive_suite_flag(tmp_path):
