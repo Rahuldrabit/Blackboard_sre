@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -7,6 +8,7 @@ import pytest
 
 from clients.graphstate.agents.topology import TopologySpecialist
 from clients.graphstate.driver.live import LiveRunner, parse_response, validate_command
+from clients.graphstate.state.schema import Hypothesis
 
 
 @pytest.mark.parametrize("command", [
@@ -206,3 +208,19 @@ def test_live_runner_uses_bounded_turns_for_expensive_remote_models():
     assert run.turns == 2
     assert run.token_reserve == 15_000
     assert run.mitigation_token_budget == 50_000
+
+
+def test_gate_fallback_uses_best_active_hypothesis_for_harness_grading():
+    run = runner()
+    run.state["hypotheses"] = [Hypothesis(
+        id="H1", timestamp=datetime.now(timezone.utc),
+        author_agent="topology", claim="service dependency is unavailable",
+        affected_services=["frontend"], causal_path=["frontend"],
+        supporting_evidence=["E1", "E2"], contradictory_evidence=[],
+        untested_predictions=[], confidence=0.6,
+    )]
+    gate = SimpleNamespace(reasons=["confidence below threshold"])
+    diagnosis = run.best_effort_diagnosis(gate)
+    assert diagnosis.root_cause == "service dependency is unavailable"
+    assert diagnosis.diagnosis_method == "best_effort_gate_fallback"
+    assert run.events[-1]["type"] == "gate_fallback"
