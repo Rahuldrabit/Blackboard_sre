@@ -329,8 +329,8 @@ class LiveRunner:
         agent = MitigationAgent()
         feedback = ""
         for _ in range(self.rounds * self.turns):
-            if self.state["token_budget_remaining"] <= 0:
-                self.record({"type": "mitigation_fallback", "reason": "token_budget_exhausted"})
+            if self.state["token_budget_remaining"] <= self.token_reserve:
+                self.record({"type": "mitigation_fallback", "reason": "token_budget_low"})
                 await self.submit("mitigation", "")
                 self.state["phase"] = "complete"
                 return
